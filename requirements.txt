@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pymongo
+motor
+groq
+instaloader
+python-dotenv
+pydantic
+ffmpeg-python
