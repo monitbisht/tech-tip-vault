@@ -1,199 +1,132 @@
 # Tech-Tip Vault 🗄️
 
-> An asynchronous AI-driven backend pipeline that ingests Instagram Reels, extracts technical knowledge using LLMs, and serves it as an on-demand, searchable developer study guide.
+![Platform](https://img.shields.io/badge/Platform-Backend_API-009688?logo=fastapi&logoColor=white)
+![Language](https://img.shields.io/badge/Language-Python-3776AB?logo=python&logoColor=white)
 
----
+## Description
 
-## 📖 Problem Statement
+**Tech-Tip Vault** is an asynchronous AI-powered backend API that solves a problem every developer faces — valuable technical knowledge consumed across Instagram Reels gets watched once and forgotten.
 
-Developers constantly consume valuable technical content — interview questions, system design tips, best practices — across Instagram Reels. This knowledge is watched once and forgotten. **Tech-Tip Vault** solves this by automatically extracting, categorizing, and indexing that content into a structured, queryable knowledge base.
+The application provides a centralized pipeline to ingest Instagram Reels, automatically detect whether the core content lives in the caption or the spoken audio, extract and categorize it using an LLM, and index it into a searchable knowledge base organized by topic. The result is an on-demand, queryable study guide for interview preparation and technical learning — built entirely from content you already consume.
 
----
+## Table of Contents
+* [Key Features](#key-features)
+* [Tech Stack](#tech-stack)
+* [API Endpoints](#api-endpoints)
+* [Installation](#installation)
+* [Usage](#usage)
+* [Project Structure](#project-structure)
+* [Contact](#contact)
 
-## 🏗️ Architecture
+## Key Features
 
-```
-POST /tips/ingest (Instagram Reel URL)
-          │
-          ▼
-  ┌───────────────────┐
-  │  202 Accepted     │  ← Returns instantly (<10ms)
-  │  (main thread)    │
-  └───────────────────┘
-          │
-          ▼  Background Task
-  ┌────────────────────────────────────────────┐
-  │           INGESTION PIPELINE               │
-  │                                            │
-  │  1. instaloader → fetch caption + video    │
-  │                                            │
-  │  2. Content Source Decision:               │
-  │     ┌──────────────┬───────────────────┐   │
-  │     │ Caption has  │  Caption empty /  │   │
-  │     │ real content │  music-only reel  │   │
-  │     │     ↓        │        ↓          │   │
-  │     │ Use caption  │  Groq Whisper     │   │
-  │     │              │  (transcription)  │   │
-  │     └──────────────┴───────────────────┘   │
-  │                    ↓                       │
-  │  3. Groq LLM (llama3-8b-8192)              │
-  │     - Classify: tip or question            │
-  │     - Assign subcategory (e.g. Java Core)  │
-  │     - Summarize tips / extract questions   │
-  │     - Generate tags                        │
-  │                    ↓                       │
-  │  4. MongoDB Atlas (insert document)        │
-  └────────────────────────────────────────────┘
-```
+* **Smart Content Source Detection:** Automatically decides whether to use the reel's caption or transcribe the video audio via Groq Whisper, correctly handling both spoken-content reels and music-only reels where all the value is in the caption.
+* **AI Classification and Extraction:** Uses a Groq LLM to classify each piece of content as a tip or an interview question, assign it a subcategory (e.g. Java Core, Spring Boot, System Design), and either summarize it or extract questions cleanly depending on the type.
+* **Dynamic NoSQL Schema:** MongoDB's flexible document model stores AI-generated tags and subcategories without requiring schema migrations as new categories emerge.
+* **On-Demand Study Guides:** Aggregation pipeline endpoints filter and flatten stored content by topic into clean, focused study guides ready for interview preparation.
 
----
-
-## 💻 Tech Stack
+## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
 | Language | Python 3.10+ |
 | Framework | FastAPI + Uvicorn |
 | Database | MongoDB Atlas (PyMongo) |
-| LLM | Groq API — `llama3-8b-8192` |
+| LLM | Groq API — `llama-3.1-8b-instant` |
 | Transcription | Groq Whisper — `whisper-large-v3` |
 | Instagram Fetching | `instaloader` |
 | Validation | Pydantic v2 |
 | Docs | Swagger UI (auto-generated at `/docs`) |
 
----
-
-## 📡 API Endpoints
+## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/tips/ingest` | Accepts Instagram Reel URL, returns `202 Accepted`, triggers background pipeline |
-| `GET` | `/tips/` | Paginated vault of all processed tips and questions |
-| `GET` | `/tips/search/?tag=` | Queries multikey index to return all content matching a tag |
-| `GET` | `/tips/categories/` | Returns all types and subcategories (for dynamic menu building) |
-| `GET` | `/study-guide/{tag}` | Aggregation pipeline: groups and flattens all content for a tag into a study guide |
-| `GET` | `/study-guide/{tag}/subcategory/{subcategory}` | Drill-down: content filtered by both tag and subcategory |
+| `POST` | `/tips/ingest` | Accepts an Instagram Reel URL, returns `202 Accepted`, triggers the background pipeline |
+| `GET` | `/questions/` | Returns all available question subcategories |
+| `GET` | `/questions/{subcategory}` | Returns all questions under a specific subcategory |
+| `GET` | `/tips/` | Returns all available tip subcategories |
+| `GET` | `/tips/{subcategory}` | Returns all tips under a specific subcategory |
+| `GET` | `/search/?tag=` | Searches across all content by tag |
+| `GET` | `/study-guide/{tag}` | Aggregates and flattens all content for a tag into a study guide |
 
----
-
-## ⚙️ Key Technical Decisions
-
-### 1. Non-Blocking Ingestion (BackgroundTasks)
-LLM inference + video transcription can take 10–30 seconds. Running this synchronously would block the server. By offloading to FastAPI's `BackgroundTasks`, the endpoint returns `202 Accepted` in under **10ms** regardless of LLM latency.
-
-### 2. Dynamic NoSQL Schema (MongoDB)
-AI-generated subcategories are unpredictable. A rigid SQL schema would require migrations every time the LLM creates a new category. MongoDB's flexible document model stores dynamic tag arrays natively.
-
-**Multikey Indexes** are created on startup on the `tags` array field, enabling sub-50ms queries across all AI-generated categories.
-
-### 3. Content Source Detection
-Not all reels have speech. The pipeline first checks the caption (stripping hashtags/mentions). If substantial content exists there, it's used directly. Otherwise, the video is transcribed via Groq Whisper — handling music-only reels correctly.
-
-### 4. Strict JSON Prompting
-The LLM is prompted with `temperature=0.2` and explicit JSON format instructions to ensure consistent, parseable outputs. Markdown fences are stripped defensively in case the model adds them.
-
----
-
-## 🚀 Setup & Running
+## Installation
 
 ### Prerequisites
 - Python 3.10+
 - MongoDB Atlas account (free tier works)
 - Groq API key — [Get one free at console.groq.com](https://console.groq.com)
 
-### Installation
+### Steps
 
-```bash
-git clone https://github.com/yourusername/tech-tip-vault
-cd tech-tip-vault
+1. **Clone the repository**
+    ```bash
+    git clone https://github.com/monitbisht/tech-tip-vault.git
+    cd tech-tip-vault
+    ```
 
-pip install -r requirements.txt
-```
+2. **Install dependencies**
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-### Configuration
+3. **Configure environment**
+    ```bash
+    # Create a .env file in the root directory with the following keys:
+    # GROQ_API_KEY=gsk_...
+    # MONGO_URI=mongodb+srv://...
+    # DB_NAME=tech_tip_vault
+    ```
 
-```bash
-cp .env.example .env
-# Edit .env with your actual keys:
-# GROQ_API_KEY=gsk_...
-# MONGO_URI=mongodb+srv://...
-# DB_NAME=tech_tip_vault
-```
-
-### Run
-
-```bash
-uvicorn main:app --reload
-```
+4. **Run the server**
+    ```bash
+    uvicorn main:app --reload
+    ```
 
 Visit `http://localhost:8000/docs` for the interactive Swagger UI.
 
----
+## Usage
 
-## 📦 Example Usage
-
-### Ingest a Reel
+**Ingest a Reel**
 ```bash
 curl -X POST http://localhost:8000/tips/ingest \
   -H "Content-Type: application/json" \
   -d '{"url": "https://www.instagram.com/reel/ABC123/"}'
 ```
 
-**Response (instant):**
-```json
-{
-  "status": "accepted",
-  "message": "Reel received. Processing pipeline started in background.",
-  "url": "https://www.instagram.com/reel/ABC123/"
-}
-```
-
-### Search by Tag
+**Browse Questions by Subcategory**
 ```bash
-curl "http://localhost:8000/tips/search/?tag=Java"
+curl http://localhost:8000/questions/Java Core
 ```
 
-### Get Study Guide
+**Get a Study Guide**
 ```bash
-curl "http://localhost:8000/study-guide/Spring Boot"
+curl http://localhost:8000/study-guide/Spring Boot
 ```
 
-**Response:**
-```json
-{
-  "tag": "Spring Boot",
-  "total_items": 12,
-  "sections": {
-    "questions": {
-      "count": 7,
-      "items": [...]
-    },
-    "tips": {
-      "count": 5,
-      "items": [...]
-    }
-  }
-}
-```
-
----
-
-## 📁 Project Structure
+## Project Structure
 
 ```
 tech-tip-vault/
 ├── main.py                         # FastAPI app entry point
 ├── config.py                       # Environment variable loading
-├── database.py                     # MongoDB connection + index setup
+├── database.py                     # MongoDB connection and index setup
 ├── models.py                       # Pydantic request/response models
 ├── services/
-│   ├── instagram_service.py        # instaloader: caption fetch + video download
-│   ├── groq_service.py             # Whisper transcription + LLM processing
+│   ├── instagram_service.py        # Caption fetching and video download
+│   ├── groq_service.py             # Whisper transcription and LLM processing
 │   └── processing_service.py       # Full pipeline orchestration
 ├── routers/
 │   ├── ingest.py                   # POST /tips/ingest
-│   ├── tips.py                     # GET /tips/, /tips/search/, /tips/categories/
-│   └── study_guide.py              # GET /study-guide/{tag}
+│   ├── tips.py                     # Questions and Tips endpoints
+│   └── study_guide.py              # Study guide aggregation endpoints
 ├── requirements.txt
 └── .env.example
 ```
+
+## Contact
+
+Created by **Monit Bisht** — Aspiring Backend Developer.
+
+* [GitHub Profile](https://github.com/monitbisht)
+* **Email:** monitbisht15@gmail.com
